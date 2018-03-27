@@ -4,4 +4,4 @@
 
 ## Task
 Find matching files in two specified directories(1st and 2nd command line arguments) and all their subdirectories.
-Output to console and file (3rd command line argument) absolute path, size in bytes, last modification time, permissions, inode number. 
+Output absolute path, size in bytes, last modification time, permissions, inode number to console and file (3rd command line argument). 
