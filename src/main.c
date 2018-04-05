@@ -1,3 +1,10 @@
+/*
+4. Найти совпадающие по содержимому файлы в двух заданных каталогах
+(аргументы 1 и 2 командной строки) и всех их подкаталогах.
+Вывести на консоль и в файл (аргумент 3 командной строки) полный
+путь, размер, дату создания, права доступа, номер индексного дескриптора.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -9,25 +16,116 @@
 #include <limits.h>
 #include <fcntl.h>
 #include <time.h>
+#include <errno.h>
+#include <libgen.h>
 
 #include "SLList.h"
 
+void print_error              (const char *module_name, const char* additional_info, const char *error_msg);
+bool is_dir                   (const char *dir_path);
+int  read_dir_to_list         (const char *curr_dir_path, struct SLList *source_list);
+int  filecmp                  (const char *path1, const char *path2);
+int  log_file_info            (const char *file_path, const char *outputfile_path);
+void cmp_files_lists_with_log (struct SLList *first_list, struct SLList *second_list, const char *log_file);
 
-void read_dir_to_list(const char *curr_dir_path, struct SLList *source_list)
+char *module_name;
+
+int main(int argc, char *argv[])
+{
+  const int VALID_ARGS_COUNT = 4;
+
+  if (argc < VALID_ARGS_COUNT)
+  {
+    print_error(module_name, NULL, "too few arguments");
+    return 1;
+  }
+
+  module_name = basename(argv[0]);
+
+  const char *first_dir_name   = argv[1];
+  const char *second_dir_name  = argv[2];
+  const char *output_file_name = argv[3];
+
+  if (!is_dir(first_dir_name))
+  {
+    print_error(module_name, first_dir_name, "not a dir");
+    return 1;
+  }
+
+  if (!is_dir(second_dir_name))
+  {
+    print_error(module_name, second_dir_name, "not a dir");
+    return 1;
+  }
+
+  struct SLList *first_list  = (struct SLList*)malloc(sizeof(struct SLList *));
+  struct SLList *second_list = (struct SLList*)malloc(sizeof(struct SLList *));
+
+  if (!first_list || !second_list)
+  {
+    print_error(module_name, NULL, "memory allocation error");
+    return 1;
+  }
+
+  sll_init(first_list);
+  sll_init(second_list);
+
+  read_dir_to_list(first_dir_name, first_list);
+  read_dir_to_list(second_dir_name, second_list);
+
+  cmp_files_lists_with_log(first_list, second_list, output_file_name);
+
+  sll_terminate(first_list);
+  sll_terminate(second_list);
+
+  free(first_list);
+  free(second_list);
+
+  return 0;
+}
+
+bool is_dir(const char *dir_path)
+{
+  struct stat temp_stat;
+
+  if (lstat(dir_path, &temp_stat) == -1)
+  {
+    print_error(module_name, NULL, strerror(errno));
+    return false;
+  }
+
+  return S_ISDIR(temp_stat.st_mode);
+}
+
+void print_error(const char *module_name, const char* additional_info, const char *error_msg)
+{
+  if (additional_info)
+  {
+    fprintf(stderr, "%s: %s: %s\n", module_name, additional_info, error_msg);
+  }
+  else
+  {
+    fprintf(stderr, "%s: %s\n", module_name, error_msg);
+  }
+}
+
+int read_dir_to_list(const char *curr_dir_path, struct SLList *source_list)
 {
   DIR *curr_dir = opendir(curr_dir_path);
 
   if (!curr_dir)
   {
-    perror("Smth went wrong");
+    print_error(module_name, curr_dir_path, strerror(errno));
+    return 1;
   }
 
   struct dirent *temp_dirent;
 
   while ((temp_dirent = readdir(curr_dir)) != NULL)
   {
-    if (!strcmp(".", temp_dirent->d_name) || !strcmp("..", temp_dirent->d_name)) {
-            continue;
+    if (!strcmp(".", temp_dirent->d_name) || !strcmp("..", temp_dirent->d_name))
+    {
+      continue;
     }
 
     if (temp_dirent->d_type == DT_REG)
@@ -39,10 +137,7 @@ void read_dir_to_list(const char *curr_dir_path, struct SLList *source_list)
       strcat(unresovled_path, "/");
       strcat(unresovled_path, temp_dirent->d_name);
 
-      if (!realpath(unresovled_path, full_path))
-      {
-        perror("Smth went wrong");
-      }
+      realpath(unresovled_path, full_path);
 
       sll_push(source_list, full_path);
     }
@@ -58,15 +153,39 @@ void read_dir_to_list(const char *curr_dir_path, struct SLList *source_list)
     }
   }
 
-  closedir(curr_dir);
+  //check readdir return value
+  if (errno)
+  {
+    print_error(module_name, curr_dir_path, strerror(errno));
+    return 1;
+  }
+
+  if (closedir(curr_dir) == -1)
+  {
+    print_error(module_name, curr_dir_path, strerror(errno));
+    return 1;
+  }
+
+  return 0;
 }
 
-bool filecmp(char *path1, char *path2)
+int filecmp(const char *path1, const char *path2)
 {
   const int READ_BLOCK = 4096;
 
   int fd1 = open(path1, O_RDONLY);
+  if (fd1 == -1)
+  {
+    print_error(module_name, path1, strerror(errno));
+    return 1;
+  }
+
   int fd2 = open(path2, O_RDONLY);
+  if (fd2 == -1)
+  {
+    print_error(module_name, path2, strerror(errno));
+    return 1;
+  }
 
   char buf1[READ_BLOCK + 1];
   char buf2[READ_BLOCK + 1];
@@ -77,32 +196,39 @@ bool filecmp(char *path1, char *path2)
   while ((read_bytes1 = read(fd1, buf1, READ_BLOCK)) > 0 && (read_bytes2 = read(fd2, buf2, READ_BLOCK)) > 0)
   {
     buf1[read_bytes1] = '\0';
-    buf1[read_bytes2] = '\0';
+    buf2[read_bytes2] = '\0';
 
     if (read_bytes1 != read_bytes2)
     {
-      return false;
+      close(fd1);
+      close(fd2);
+
+      return 1;
     }
 
     if (strcmp(buf1, buf2) != 0)
     {
-      return false;
+      close(fd1);
+      close(fd2);
+
+      return 1;
     }
   }
 
   close(fd1);
   close(fd2);
-  return true;
+
+  return 0;
 }
 
-void print_file_info(const char *file_path, const char *outputfile_path)
+int log_file_info(const char *file_path, const char *outputfile_path)
 {
-  int output_file = open(outputfile_path, O_WRONLY | O_CREAT | O_APPEND);
+  int output_file = open(outputfile_path, O_WRONLY | O_CREAT | O_APPEND, 0664);
 
   if (output_file == -1)
   {
-    perror("Smth went wrong");
-    return;
+    print_error(module_name, outputfile_path, strerror(errno));
+    return 1;
   }
 
   const int WRITE_BLOCK = 8192;
@@ -110,10 +236,11 @@ void print_file_info(const char *file_path, const char *outputfile_path)
 
   struct stat file_stat;
 
-  if (stat(file_path, &file_stat) == -1)
+  if (lstat(file_path, &file_stat) == -1)
   {
-    perror("Smth went wrong");
-    return;
+    print_error(module_name, file_path, strerror(errno));
+    close(output_file);
+    return 1;
   }
 
   char file_perms[PERMS_BLOCK + 1];
@@ -140,16 +267,20 @@ void print_file_info(const char *file_path, const char *outputfile_path)
   strcat(file_info, temp_buf);
   sprintf(temp_buf, "%s ", file_perms);
   strcat(file_info, temp_buf);
-  sprintf(temp_buf, "%ld\n", (long)file_stat.st_ino);
+  sprintf(temp_buf, "%ld \n", (long)file_stat.st_ino);
   strcat(file_info, temp_buf);
-
-  //printf("%s", file_info);
+  
   if (write(output_file, file_info, strlen(file_info)) == -1)
   {
-    perror("Smth went wrong");
+    print_error(module_name, outputfile_path, strerror(errno));
+
+    close(output_file);
+    return 1;
   }
 
   close(output_file);
+
+  return 0;
 }
 
 void cmp_files_lists_with_log(struct SLList *first_list, struct SLList *second_list, const char *log_file)
@@ -162,11 +293,11 @@ void cmp_files_lists_with_log(struct SLList *first_list, struct SLList *second_l
 
     while (second_temp->next != NULL)
     {
-      if (filecmp(first_temp->next->value, second_temp->next->value))
+      if (!filecmp(first_temp->next->value, second_temp->next->value))
       {
-        print_file_info(first_temp->next->value, log_file);
+        log_file_info(first_temp->next->value, log_file);
 
-        print_file_info(second_temp->next->value, log_file);
+        log_file_info(second_temp->next->value, log_file);
       }
 
       second_temp = second_temp->next;
@@ -174,34 +305,4 @@ void cmp_files_lists_with_log(struct SLList *first_list, struct SLList *second_l
 
     first_temp = first_temp->next;
   }
-}
-
-int main(int argc, char *argv[])
-{
-  if (argc < 4)
-  {
-    perror("Smth went wrong");
-    return 1;
-  }
-
-  const char *first_dir_name = argv[1];
-  const char *second_dir_name = argv[2];
-  const char *output_file_name = argv[3];
-
-  struct SLList *first_list = (struct SLList*)malloc(sizeof(struct SLList *));
-  struct SLList *second_list = (struct SLList*)malloc(sizeof(struct SLList *));
-  sll_init(first_list);
-  sll_init(second_list);
-
-  read_dir_to_list(first_dir_name, first_list);
-  read_dir_to_list(second_dir_name, second_list);
-
-  cmp_files_lists_with_log(first_list, second_list, output_file_name);
-
-  sll_terminate(first_list);
-  sll_terminate(second_list);
-  free(first_list);
-  free(second_list);
-
-  return 0;
 }
