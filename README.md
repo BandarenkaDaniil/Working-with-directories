@@ -11,9 +11,9 @@ To compile all files use (in terminal):
   ```
   make
   ```
-Run program:
+Running program:
   ```
-  program_name [first_dir] [second_dir] [output_file]
+  filescmp [first_dir] [second_dir] [output_file]
   ```
   
 > **Note:** **make** creates object files and doesn't delete them. Call **make clean** to delete these files.
