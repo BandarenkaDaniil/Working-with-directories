@@ -4,7 +4,7 @@ CFLAGS=-c -Wall
 all: main
 
 main: main.o SLList.o
-	$(CC) main.o SLList.o -o main
+	$(CC) main.o SLList.o -o filescmp
 
 main.o: main.c
 	$(CC) $(CFLAGS) main.c
