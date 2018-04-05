@@ -13,4 +13,4 @@ SLList.o: SLList.c
 	$(CC) $(CFLAGS) SLList.c
 
 clean:
-		rm -rf *.o
+	rm -rf *.o
